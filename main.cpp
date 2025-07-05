@@ -13,12 +13,12 @@
 #define RatioMQ2CleanAir (9.83)
 #define LED_PIN 2
 
-// WiFi Configuration
-const char* ssid = "Wokwi-GUEST";
-const char* password = "";
+// WiFi Configuration - USA TU CONFIGURACIÓN ACTUAL
+const char* ssid = "Wokwi-GUEST";       
+const char* password = "";               
 
-// Server Configuration
-const char* serverURL = "http://httpbin.org/post";
+// Server Configuration - IP CONFIRMADA
+const char* serverURL = "";
 
 // MQ2 Library Instance Setup
 MQUnifiedsensor MQ2(Board, Voltage_Resolution, ADC_Bit_Resolution, Pin, Type);
@@ -33,6 +33,7 @@ const unsigned long POST_COOLDOWN = 10000;
 // Function declarations
 void setupWiFi();
 void sendUnsafeAlert(int gasPercentage, float ppmValue);
+void testServerConnection(); // Nueva función para probar conexión
 
 void setup() {
   // LCD Init
@@ -48,6 +49,9 @@ void setup() {
 
   // WiFi Setup
   setupWiFi();
+  
+  // Probar conexión al servidor
+  testServerConnection();
 
   // Set Parameters to detect PPM concentration for LPG
   MQ2.setRegressionMethod(1);
@@ -73,7 +77,6 @@ void setup() {
   delay(500);
 
   // Exception handling
-  // Connection Issue Exceptions
   if(isinf(calcR0)) { Serial.println("Warning: R0 value is infinite. Please check your wiring."); while(1); }
   if(calcR0 == 0) { Serial.println("Warning: R0 value is zero. Please check your wiring."); while(1); }
 
@@ -93,6 +96,7 @@ void loop() {
   MQ2.update();
   MQ2.readSensor();
   MQ2.serialDebug();
+  
   // Read values
   gas_value = analogRead(Pin);
   gas_value = map(gas_value, 0, 4095, 0, 100);
@@ -118,19 +122,15 @@ void loop() {
     digitalWrite(LED_PIN, LOW);
   }
 
-   // Show status on second line of LCD
-  lcd.setCursor(0, 1);
-  if (currentUnsafeState) {
-    // Send POST if changed to unsafe and cooldown has passed
-    if (!lastUnsafeState && (millis() - lastPostTime > POST_COOLDOWN)) {
-      Serial.println("Enviando alerta POST...");
-      sendUnsafeAlert(gas_value, (gas_value * 10));
-      lastPostTime = millis();
-    }
+  // Send POST if changed to unsafe and cooldown has passed
+  if (currentUnsafeState && !lastUnsafeState && (millis() - lastPostTime > POST_COOLDOWN)) {
+    Serial.println("Enviando alerta POST...");
+    sendUnsafeAlert(gas_value, (gas_value * 10));
+    lastPostTime = millis();
   }
+  
   lastUnsafeState = currentUnsafeState;
-
-  delay(500); // this speeds up the simulation
+  delay(500);
 }
 
 void setupWiFi() {
@@ -171,65 +171,108 @@ void setupWiFi() {
   delay(2000);
 }
 
-void sendUnsafeAlert(int gasPercentage, float ppmValue) {
+void testServerConnection() {
   if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("Probando conexión al servidor...");
+    
     HTTPClient http;
     http.begin(serverURL);
-    http.addHeader("Content-Type", "application/json");
-    http.setTimeout(10000);
+    http.setTimeout(5000);
     
-    int rawADC = analogRead(Pin);
-    
-    // Create JSON payload
-    String jsonString = "{";
-    jsonString += "\"timestamp\":" + String(millis()) + ",";
-    jsonString += "\"sensor_id\":\"MQ2_ESP32_001\",";
-    jsonString += "\"gas_level_percent\":" + String(gasPercentage) + ",";
-    jsonString += "\"gas_level_ppm\":" + String(ppmValue, 2) + ",";
-    jsonString += "\"raw_adc\":" + String(rawADC) + ",";
-    jsonString += "\"status\":\"UNSAFE\",";
-    jsonString += "\"threshold_digital\":" + String(digitalRead(Threshold)) + ",";
-    jsonString += "\"r0_value\":" + String(MQ2.getR0(), 2) + ",";
-    jsonString += "\"location\":\"Lab_Room_A\",";
-    jsonString += "\"alert_type\":\"GAS_LEAK_DETECTED\",";
-    jsonString += "\"device_ip\":\"" + WiFi.localIP().toString() + "\",";
-    jsonString += "\"sensor_type\":\"MQ2_Unified\"";
-    jsonString += "}";
-    
-    Serial.println("Enviando POST...");
-    Serial.println("Payload: " + jsonString);
-    
-    int httpResponseCode = http.POST(jsonString);
+    // Hacer una petición GET simple para probar
+    int httpResponseCode = http.GET();
     
     if (httpResponseCode > 0) {
-      String response = http.getString();
-      Serial.println("HTTP Code: " + String(httpResponseCode));
-      Serial.println("Response: " + response);
-      
-      // Show success briefly
+      Serial.println("Servidor accesible! Código: " + String(httpResponseCode));
       lcd.clear();
-      lcd.print("POST OK!");
+      lcd.print("Server OK");
       lcd.setCursor(0, 1);
       lcd.print("Code: " + String(httpResponseCode));
-      delay(1500);
-      
     } else {
-      Serial.println("POST Error: " + String(httpResponseCode));
+      Serial.println("Error conectando al servidor: " + String(httpResponseCode));
       Serial.println("Error detail: " + http.errorToString(httpResponseCode));
-      
-      // Show error briefly
       lcd.clear();
-      lcd.print("POST Error");
+      lcd.print("Server Error");
       lcd.setCursor(0, 1);
-      lcd.print("Code: " + String(httpResponseCode));
-      delay(1500);
+      lcd.print("Check IP/Port");
     }
     
     http.end();
+    delay(2000);
+  }
+}
+
+void sendUnsafeAlert(int gasPercentage, float ppmValue) {
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("=== ENVIANDO ALERTA POST ===");
+    Serial.println("URL: " + String(serverURL));
+    
+    HTTPClient http;
+    http.begin(serverURL);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("User-Agent", "ESP32-GasSensor/1.0");
+    http.setTimeout(15000);
+    
+    // Create JSON payload con formato mejorado
+    String jsonString = "{";
+    jsonString += "\"api_key\":\"abc123key\",";
+    jsonString += "\"current_value\":" + String(gasPercentage) + ",";
+    jsonString += "\"device_id\":\"sensor001\",";
+    jsonString += "\"room_id\":101";
+    jsonString += "}";
+    
+    Serial.println("Payload JSON: " + jsonString);
+    Serial.println("Conectando al servidor...");
+    
+    int httpResponseCode = http.POST(jsonString);
+    
+    Serial.println("=== RESPUESTA DEL SERVIDOR ===");
+    
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.println("✓ HTTP Code: " + String(httpResponseCode));
+      Serial.println("✓ Response: " + response);
+      
+      // Mostrar en LCD
+      lcd.clear();
+      if (httpResponseCode == 200) {
+        lcd.print("POST SUCCESS!");
+        lcd.setCursor(0, 1);
+        lcd.print("Alert Sent OK");
+      } else {
+        lcd.print("POST OK but...");
+        lcd.setCursor(0, 1);
+        lcd.print("Code: " + String(httpResponseCode));
+      }
+      delay(2000);
+      
+    } else {
+      Serial.println("✗ POST Error: " + String(httpResponseCode));
+      String errorStr = http.errorToString(httpResponseCode);
+      Serial.println("✗ Error detail: " + errorStr);
+      
+      // Mostrar error específico en LCD
+      lcd.clear();
+      lcd.print("POST Error");
+      lcd.setCursor(0, 1);
+      if (httpResponseCode == -1) {
+        lcd.print("Connection Fail");
+      } else if (httpResponseCode == -3) {
+        lcd.print("Host Not Found");
+      } else {
+        lcd.print("Code: " + String(httpResponseCode));
+      }
+      delay(2000);
+    }
+    
+    http.end();
+    Serial.println("=== FIN DE TRANSMISIÓN ===");
   } else {
-    Serial.println("WiFi desconectado - no se puede enviar POST");
+    Serial.println("✗ WiFi desconectado - no se puede enviar POST");
     lcd.clear();
     lcd.print("WiFi Error");
+    lcd.setCursor(0, 1);
+    lcd.print("Check Connection");
     delay(1000);
   }
 }
